@@ -122,8 +122,6 @@ class DummyAgent(CaptureAgent):
 
     self.midWidth = gameState.data.layout.width/2
 
-
-
     return
 
 
@@ -275,7 +273,7 @@ class DummyAgent(CaptureAgent):
 
   def maxNode(self, gameState, depth):
     if gameState.isOver() or depth == 0:
-      return self.evaluationFuntion(gameState), Directions.STOP
+      return self.evaluationFunction(gameState), Directions.STOP
 
     maxValue = -999999
     values = []
@@ -320,7 +318,8 @@ class DummyAgent(CaptureAgent):
 
 
 
-  def evaluationFuntion(self, gameState):
+  def evaluationFunction(self, gameState):
+    # print(self)
     util.raiseNotDefined()
 
 
