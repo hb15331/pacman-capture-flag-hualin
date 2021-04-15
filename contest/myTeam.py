@@ -183,13 +183,6 @@ class DummyAgent(CaptureAgent):
     """
     Predict beliefs in response to a time step passing from the current state
     """
-    # use asList method to retrieve all possible positions for agent
-    # allPositions = []
-    # exclude the wall positions
-    # for pos in gameState.getWalls().asList(False):
-    #   if pos[1] > 1:
-    #     allPositions.append(pos)
-
     newBelief = util.Counter()
 
     for oldPos in self.allPositions:
@@ -318,9 +311,8 @@ class DummyAgent(CaptureAgent):
 
 
 
-  def evaluationFunction(self, gameState):
-    # print(self)
-    util.raiseNotDefined()
+  # def evaluationFunction(self, gameState):
+  #   util.raiseNotDefined()
 
 
 
@@ -333,16 +325,50 @@ class OffensiveAgent(DummyAgent):
 
 
   def chooseAction(self, gameState):
-    # agent decides when to return home and garner the points collected, based on
-    # 1. how much the team score leads
-    # 2. proximity to opponent
-    # 3. amount of food it is holding
+    # agents consider following criteria to decide when to return home and garner the points collected
+    # 1. proximity to opponent
+    # 2. amount of food it is holding
 
-    # relevant data is stored in game.py
+    ghostDistances = []
+    currPos = gameState.getAgentPosition(self.index)
+    for opponent in self.opponents:
+      if not gameState.getAgentState(opponent).isPacman:
+        ghostDist = self.distancer.getDistance(currPos, self.beliefs[opponent].argMax())
+        ghostDistances.append(ghostDist)
+
+    minGhostDist = min(ghostDistances)
+    print(minGhostDist)
+
     agentState = gameState.getAgentState(self.index)
-    if agentState.numCarrying > 10:
+
+    # TODO: return home when there are less than 2 foods on the board
+    
+
+    # return home after eating enough foods and getting too close to opponent
+    if agentState.numCarrying > 3:
+      if minGhostDist < 5:
+        self.attack = False
+      else:
+        self.attack = True
+    else:
+      if minGhostDist < 5:
+        self.attack = False
+      else:
+        self.attack = True
+
+    if len(self.getFood(gameState).asList()) < 3:
       self.attack = False
 
+    print("carrying: " + str(agentState.numCarrying))
+    print("minGhostDist: " + str(minGhostDist))
+    print(self.attack)
+
+    # return immediately when the ghost is too close
+    # if minGhostDist < 5:
+    #   self.attack = False
+    # else:
+    #   self.attack = True
+    # print(self.attack)
 
     return DummyAgent.chooseAction(self, gameState)
 
@@ -352,10 +378,12 @@ class OffensiveAgent(DummyAgent):
   def evaluationFunction(self, gameState):
     """
     Use heuristic evaluation function to estimate utilities for non-terminal states
+    The game state is evaluated differently based on the operation mode of agents
     """
     currScore = self.getScore(gameState)
     currPos = gameState.getAgentPosition(self.index)
 
+    # compute the distance between agent and closest food
     distancesToFoods = []
     foodList = self.getFood(gameState).asList()
     for foodPos in foodList:
@@ -367,7 +395,8 @@ class OffensiveAgent(DummyAgent):
     if len(distancesToFoods) != 0:
       distanceToClosestFood = min(distancesToFoods)
 
-
+    # compute the distance between agent and closest ghost
+    # TODO: use belief to compute the most probable position
     distancesToGhosts = []
     for opponent in self.opponents:
       if not gameState.getAgentState(opponent).isPacman:
@@ -381,13 +410,30 @@ class OffensiveAgent(DummyAgent):
     if len(distancesToGhosts) != 0:
       distanceToClosestGhost = min(distancesToGhosts)
 
+    # print(distanceToClosestGhost)
 
     if self.attack:
       foodList = self.getFood(gameState).asList()
       numOfFoods = len(foodList)
 
+      # agent can keep offensive when close to capsules
+      distancesToCapsule = []
+      if self.red:
+        capsules = gameState.getBlueCapsules()
+      else:
+        capsules = gameState.getRedCapsules()
+
+      for capsule in capsules:
+        capsuleDistance = self.distancer.getDistance(currPos, capsule)
+        distancesToCapsule.append(capsuleDistance)
+
+      minCapsuleDist = 0
+      if len(distancesToCapsule) != 0:
+        minCapsuleDist = min(distancesToCapsule)
+
+
       return 3 * currScore + distanceToClosestGhost - \
-             2 * distanceToClosestFood - 50 * numOfFoods
+             2 * distanceToClosestFood - 50 * numOfFoods - 10 * minCapsuleDist
 
     else:
       # home distance = mazeDistance(currPos, any point on board's central axis)
@@ -404,7 +450,7 @@ class OffensiveAgent(DummyAgent):
 
       minHomeDistance = min(homeDistances)
 
-      return 300 * distanceToClosestGhost - 5 * minHomeDistance
+      return 400 * distanceToClosestGhost - 2 * minHomeDistance
 
 
 
