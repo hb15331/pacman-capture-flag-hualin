@@ -119,7 +119,6 @@ class OffensiveBaseAgent(CaptureAgent):
       if pos[1] > 1:
         self.allPositions.append(pos)
 
-    self.midWidth = gameState.data.layout.width/2
 
     return
 
@@ -131,6 +130,8 @@ class OffensiveBaseAgent(CaptureAgent):
     """
     newBelief = util.Counter()
     currPos = gameState.getAgentPosition(self.index)
+    midWidth = gameState.data.layout.width/2
+
 
     noisyDistance = noisyDistances[opponent]
 
@@ -139,10 +140,10 @@ class OffensiveBaseAgent(CaptureAgent):
       # get sensor model P(e_t | x_t)
       observationProb = gameState.getDistanceProb(trueDistance, noisyDistance)
 
-      if self.red and opponentPos[0] < self.midWidth:
+      if self.red and opponentPos[0] < midWidth:
         # from red agent's view, the blue agent is a pacman only if it is on the board's left half
         pacmanCheck = True
-      elif (not self.red) and opponentPos[0] > self.midWidth:
+      elif (not self.red) and opponentPos[0] > midWidth:
         pacmanCheck = True
       else:
         pacmanCheck = False
@@ -150,8 +151,6 @@ class OffensiveBaseAgent(CaptureAgent):
       opponentType = gameState.getAgentState(opponent).isPacman
       # the opponent type does not match the possible positions it is allowed to be
       if opponentType != pacmanCheck:
-        newBelief[opponentPos] = 0
-      elif trueDistance <= 5:
         newBelief[opponentPos] = 0
       else:
         newBelief[opponentPos] = observationProb * self.beliefs[opponent][opponentPos]
@@ -214,6 +213,10 @@ class OffensiveBaseAgent(CaptureAgent):
     return newPosDistr
 
 
+  def updatePosState(self, opponent):
+    mostProbPos = self.beliefs[opponent].argMax()
+    return game.Configuration(mostProbPos, Directions.STOP)
+
 
   def updateBelief(self, gameState):
     """
@@ -246,13 +249,11 @@ class OffensiveBaseAgent(CaptureAgent):
     stateCopy = gameState.deepCopy()
 
     for opponent in self.opponents:
-      mostProbPos = self.beliefs[opponent].argMax()
-      posConfig = game.Configuration(mostProbPos, Directions.STOP)
+      posConfig = self.updatePosState(opponent)
       stateCopy.data.agentStates[opponent] = game.AgentState(posConfig, gameState.getAgentState(opponent).isPacman)
 
     optAction = self.maxNode(stateCopy, 2)[1]
     return optAction
-
 
 
   def maxNode(self, gameState, depth):
@@ -316,6 +317,7 @@ class OffensiveAgent(OffensiveBaseAgent):
 
     ghostDistances = []
     currPos = gameState.getAgentPosition(self.index)
+
     for opponent in self.opponents:
       if not gameState.getAgentState(opponent).isPacman:
         ghostDist = self.distancer.getDistance(currPos, self.beliefs[opponent].argMax())
@@ -325,18 +327,6 @@ class OffensiveAgent(OffensiveBaseAgent):
 
     agentState = gameState.getAgentState(self.index)
 
-    # return home after eating enough foods and getting too close to opponent
-    # if agentState.numCarrying > 3:
-    #   if minGhostDist < 5:
-    #     self.attack = False
-    #   else:
-    #     self.attack = True
-    # else:
-    #   if minGhostDist < 5:
-    #     self.attack = False
-    #   else:
-    #     self.attack = True
-
     scaredTimers = []
     for opponent in self.opponents:
       scaredTimers.append(gameState.getAgentState(opponent).scaredTimer)
@@ -344,16 +334,15 @@ class OffensiveAgent(OffensiveBaseAgent):
 
     print("minScaredTime: " + str(minScaredTime))
 
-    if minGhostDist < 5 and minScaredTime < 6:
-      # if ghost is too close, always return no matter how many foods have been eaten
+    if minGhostDist < 4 and minScaredTime < 5:
+      # if ghost is too close and not scared, always return no matter how many foods have been eaten
       self.attack = False
     else:
       # if ghost is far away and agent has eaten enough foods, returns and secures the score
-      if agentState.numCarrying > 5:
+      if agentState.numCarrying > 4:
         self.attack = False
       else:
         self.attack = True
-
 
     if len(self.getFood(gameState).asList()) < 3:
       self.attack = False
@@ -380,7 +369,6 @@ class OffensiveAgent(OffensiveBaseAgent):
     for foodPos in foodList:
       foodDistance = self.distancer.getDistance(currPos, foodPos)
       distancesToFoods.append(foodDistance)
-
 
     distanceToClosestFood = 0
     if len(distancesToFoods) != 0:
@@ -420,27 +408,16 @@ class OffensiveAgent(OffensiveBaseAgent):
       if len(distancesToCapsule) != 0:
         minCapsuleDist = min(distancesToCapsule)
 
-      # consider the scared time of ghosts
-      # scaredTimers = []
-      # for opponent in self.opponents:
-      #   scaredTimers.append(gameState.getAgentState(opponent).scaredTimer)
-      # minScaredTime = min(scaredTimers)
-
-
       if distanceToClosestGhost > 5:
         distanceToClosestGhost = 0
-      # elif distanceToClosestGhost < 5 and minScaredTime > 8:
-      #   distanceToClosestGhost = 0
 
-      return 2 * currScore - 3 * distanceToClosestFood - \
-             200 * numOfFoods - 10 * minCapsuleDist + 75 * distanceToClosestGhost
+      return currScore - 3 * distanceToClosestFood - 300 * numOfFoods - 10 * minCapsuleDist + 80 * distanceToClosestGhost
 
     # offensive agents decide to return home and secure the score
     else:
       # home distance = mazeDistance(currPos, any point on board's central axis)
       boardHeight = gameState.data.layout.height
       midWidth = gameState.data.layout.width/2
-      # print(boardHeight)
 
       homeDistances = []
       for y in range(boardHeight):
@@ -451,6 +428,5 @@ class OffensiveAgent(OffensiveBaseAgent):
 
       minHomeDistance = min(homeDistances)
 
-      return 400 * distanceToClosestGhost - 3 * minHomeDistance
-
+      return 400 * distanceToClosestGhost - 4 * minHomeDistance
 
