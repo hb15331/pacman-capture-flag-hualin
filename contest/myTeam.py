@@ -4,7 +4,7 @@
 # educational purposes provided that (1) you do not distribute or publish
 # solutions, (2) you retain this notice, and (3) you provide clear
 # attribution to UC Berkeley, including a link to http://ai.berkeley.edu.
-# 
+#
 # Attribution Information: The Pacman AI projects were developed at UC Berkeley.
 # The core projects and autograders were primarily created by John DeNero
 # (denero@cs.berkeley.edu) and Dan Klein (klein@cs.berkeley.edu).
@@ -13,16 +13,24 @@
 
 
 from captureAgents import CaptureAgent
-import random, time, util
+from util import nearestPoint
+from util import manhattanDistance
+from util import nearestPoint
 from game import Directions
+from game import Actions
+from game import Grid
+
+import distanceCalculator
+import random, time, util
 import game
+
 
 #################
 # Team creation #
 #################
 
 def createTeam(firstIndex, secondIndex, isRed,
-               first = 'OffensiveAgent', second = 'OffensiveAgent'):
+               first = 'OffensiveAgent', second = 'DefensiveAgent'):
   """
   This function should return a list of two agents that will form the
   team, initialized using firstIndex and secondIndex as their agent
@@ -45,51 +53,127 @@ def createTeam(firstIndex, secondIndex, isRed,
 # Agents #
 ##########
 
-# class DummyAgent(CaptureAgent):
-#   """
-#   A Dummy agent to serve as an example of the necessary agent structure.
-#   You should look at baselineTeam.py for more details about how to
-#   create an agent as this is the bare minimum.
-#   """
-#
-#   def registerInitialState(self, gameState):
-#     """
-#     This method handles the initial setup of the
-#     agent to populate useful fields (such as what team
-#     we're on).
-#
-#     A distanceCalculator instance caches the maze distances
-#     between each pair of positions, so your agents can use:
-#     self.distancer.getDistance(p1, p2)
-#
-#     IMPORTANT: This method may run for at most 15 seconds.
-#     """
-#
-#     '''
-#     Make sure you do not delete the following line. If you would like to
-#     use Manhattan distances instead of maze distances in order to save
-#     on initialization time, please take a look at
-#     CaptureAgent.registerInitialState in captureAgents.py.
-#     '''
-#     CaptureAgent.registerInitialState(self, gameState)
-#
-#     '''
-#     Your initialization code goes here, if you need any.
-#     '''
+## ---------------------------
+## |   defense               |
+## ---------------------------
 
-  #
-  # def chooseAction(self, gameState):
-  #   """
-  #   Picks among actions randomly.
-  #   """
-  #   actions = gameState.getLegalActions(self.index)
-  #
-  #   '''
-  #   You should change this in your own agent.
-  #   '''
-  #
-  #   return random.choice(actions)
+class DefensiveBaseAgent(CaptureAgent):
+  """
+  A base class for reflex agents that chooses score-maximizing actions
+  """
 
+  def registerInitialState(self, gameState):
+    self.start = gameState.getAgentPosition(self.index)
+    CaptureAgent.registerInitialState(self, gameState)
+
+  def chooseAction(self, gameState):
+    """
+    Picks among the actions with the highest Q(s,a).
+    """
+    actions = gameState.getLegalActions(self.index)
+
+    # start = time.time()
+    values = [self.evaluate(gameState, a) for a in actions]
+    # print ('eval time for agent %d: %.4f' % (self.index, time.time() - start)
+
+    maxValue = max(values)
+    bestActions = [a for a, v in zip(actions, values) if v == maxValue]
+
+    # pick randomly from the best actions
+    return random.choice(bestActions)
+
+  def getSuccessor(self, gameState, action):
+    """
+    Finds the next successor which is a grid position (location tuple).
+    """
+    successor = gameState.generateSuccessor(self.index, action)
+    pos = successor.getAgentState(self.index).getPosition()
+    if pos != nearestPoint(pos):
+      # Only half a grid position was covered
+      return successor.generateSuccessor(self.index, action)
+    else:
+      return successor
+
+  def evaluate(self, gameState, action):
+    """
+    Computes a linear combination of features and feature weights
+    """
+    features = self.getFeatures(gameState, action)
+    weights = self.getWeights(gameState, action)
+    return features * weights
+
+  def getFeatures(self, gameState, action):
+    """
+    Returns a counter of features for the state
+    """
+    features = util.Counter()
+    successor = self.getSuccessor(gameState, action)
+    features['successorScore'] = self.getScore(successor)
+    return features
+
+  def getWeights(self, gameState, action):
+    """
+    Normally, weights do not depend on the gamestate.  They can be either
+    a counter or a dictionary.
+    """
+    return {'successorScore': 1.0}
+
+class DefensiveAgent(DefensiveBaseAgent):
+
+  def getFeatures(self, gameState, action):
+    features = util.Counter()
+    successor = self.getSuccessor(gameState, action)
+
+    myState = successor.getAgentState(self.index)
+    myPos = myState.getPosition()
+
+    # Computes whether we're on defense (1) or offense (0)
+    features['onDefense'] = 1
+    if myState.isPacman: features['onDefense'] = 0
+
+    # Computes distance to invaders we can see
+    enemies = [successor.getAgentState(i) for i in self.getOpponents(successor)]
+    invaders = [a for a in enemies if a.isPacman and a.getPosition() != None]
+    features['numInvaders'] = len(invaders)
+
+    if len(invaders) > 0:
+      dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders]
+      # features['invaderDistance'] = min(dists)
+
+      # if they are more than 5 away we know we have a noisy reading
+      if min(dists) > 5:
+        # we can see where the food has disappeared
+        beforeState = self.getPreviousObservation()
+        nowState = self.getCurrentObservation()
+        missingFood = set(self.getFood(nowState).asList()) \
+                    - set(self.getFood(beforeState).asList())
+
+        # get distance to the missing food
+        for food in list(missingFood):
+            dists.append(self.getMazeDistance(myPos, food))
+
+        # essentially, move towards the missing food
+        features['invaderDistance'] = min(dists)
+
+      else:
+          # otherwise if they are within 5, the reading is already accurate
+          features['invaderDistance'] = min(dists)
+
+
+    if action == Directions.STOP: features['stop'] = 1
+    rev = Directions.REVERSE[gameState.getAgentState(self.index).configuration.direction]
+    if action == rev: features['reverse'] = 1
+
+    return features
+
+  def getWeights(self, gameState, action):
+      return {'numInvaders': -5000, 'onDefense': 100, 'invaderDistance': -2000, 'stop': -500, 'reverse': -100}
+
+
+
+## ---------------------------
+## |   offense               |
+## ---------------------------
 
 
 class OffensiveBaseAgent(CaptureAgent):
@@ -119,9 +203,7 @@ class OffensiveBaseAgent(CaptureAgent):
       if pos[1] > 1:
         self.allPositions.append(pos)
 
-
     return
-
 
 
   def observeUpdate(self, noisyDistances, gameState, opponent):
@@ -245,6 +327,7 @@ class OffensiveBaseAgent(CaptureAgent):
     """
     Return the expectiMax action using self.depth and self.evaluation function
     """
+    start = time.time()
     self.updateBelief(gameState)
     stateCopy = gameState.deepCopy()
 
@@ -252,7 +335,7 @@ class OffensiveBaseAgent(CaptureAgent):
       posConfig = self.updatePosState(opponent)
       stateCopy.data.agentStates[opponent] = game.AgentState(posConfig, gameState.getAgentState(opponent).isPacman)
 
-    optAction = self.maxNode(stateCopy, 2)[1]
+    optAction = self.maxNode(stateCopy, 1)[1]
     return optAction
 
 
@@ -262,8 +345,10 @@ class OffensiveBaseAgent(CaptureAgent):
 
     maxValue = -999999
     values = []
+    actions = gameState.getLegalActions(self.index)
+    actions.remove(Directions.STOP)
 
-    for action in gameState.getLegalActions(self.index):
+    for action in actions:
       successor = gameState.generateSuccessor(self.index, action)
       expectiValue = self.expectiNode(self.opponents[0], successor, depth)[0]
       values.append(expectiValue)
@@ -273,9 +358,9 @@ class OffensiveBaseAgent(CaptureAgent):
 
     # could exist multiple actions that yield same best result
     optActions = [i for i in range(len(values)) if values[i] == maxValue]
-    actions = gameState.getLegalActions(self.index)
     optAction = actions[random.choice(optActions)]
 
+    # print(optAction)
     return maxValue, optAction
 
 
@@ -287,8 +372,9 @@ class OffensiveBaseAgent(CaptureAgent):
 
     totalValue = 0
     actions = gameState.getLegalActions(opponent)
+    # actions.remove(Directions.STOP)
 
-    for action in gameState.getLegalActions(opponent):
+    for action in actions:
       successor = gameState.generateSuccessor(opponent, action)
       # continue expanding the next opponent's state
       if opponent == self.opponents[0]:
@@ -332,9 +418,9 @@ class OffensiveAgent(OffensiveBaseAgent):
       scaredTimers.append(gameState.getAgentState(opponent).scaredTimer)
     minScaredTime = min(scaredTimers)
 
-    print("minScaredTime: " + str(minScaredTime))
+    #print("minScaredTime: " + str(minScaredTime))
 
-    if minGhostDist < 4 and minScaredTime < 5:
+    if minGhostDist < 6 and minScaredTime < 5:
       # if ghost is too close and not scared, always return no matter how many foods have been eaten
       self.attack = False
     else:
@@ -347,9 +433,9 @@ class OffensiveAgent(OffensiveBaseAgent):
     if len(self.getFood(gameState).asList()) < 3:
       self.attack = False
 
-    print("carrying: " + str(agentState.numCarrying))
-    print("minGhostDist: " + str(minGhostDist))
-    print(self.attack)
+    #print("carrying: " + str(agentState.numCarrying))
+    #print("minGhostDist: " + str(minGhostDist))
+    #print(self.attack)
 
     return OffensiveBaseAgent.chooseAction(self, gameState)
 
@@ -411,7 +497,7 @@ class OffensiveAgent(OffensiveBaseAgent):
       if distanceToClosestGhost > 5:
         distanceToClosestGhost = 0
 
-      return currScore - 3 * distanceToClosestFood - 300 * numOfFoods - 10 * minCapsuleDist + 80 * distanceToClosestGhost
+      return currScore - 2 * distanceToClosestFood - 400 * numOfFoods - 10 * minCapsuleDist + 100 * distanceToClosestGhost
 
     # offensive agents decide to return home and secure the score
     else:
@@ -428,5 +514,4 @@ class OffensiveAgent(OffensiveBaseAgent):
 
       minHomeDistance = min(homeDistances)
 
-      return 400 * distanceToClosestGhost - 4 * minHomeDistance
-
+      return 500 * distanceToClosestGhost - 5 * minHomeDistance
